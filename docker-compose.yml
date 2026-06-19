@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  ride-app:
+    image: node:20-slim
+    container_name: ride_app
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0 
+    command: >
+      /bin/sh -c "
+      echo 'Preparando entorno...' &&
+      apt-get update && apt-get install -y git &&
+      
+      echo 'Sincronizando con GitHub de forma segura...' &&
+      if [ ! -d '.git' ]; then
+        git init &&
+        git remote add origin https://github.com/marcogugliandolo/TU_REPOSITORIO.git ;
+      fi &&
+      
+      git fetch origin main &&
+      git reset --hard origin/main &&
+      
+      echo 'Instalando dependencias...' && npm install &&
+      echo 'Compilando...' && npm run build &&
+      echo 'Arrancando servidor...' && npx serve -s dist -l 3000
+      "

@@ -5,12 +5,48 @@ import { X, User, History, Settings, HelpCircle, Save, LogOut, Info, MapPin } fr
 interface MenuModalsProps {
   activeModal: string | null;
   onClose: () => void;
-  onLogin?: () => void;
+  user?: {name: string, email: string} | null;
+  onLogin?: (u: {name: string, email: string}) => void;
   onLogout?: () => void;
 }
 
-export function MenuModals({ activeModal, onClose, onLogin, onLogout }: MenuModalsProps) {
+export function MenuModals({ activeModal, onClose, user, onLogin, onLogout }: MenuModalsProps) {
   const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  
+  const handleAuth = () => {
+    setError('');
+    const users = JSON.parse(localStorage.getItem('taxi_users_db') || '{}');
+    
+    if (isRegisterMode) {
+       if (!name || !email || !password) {
+         setError('Por favor, rellena todos los campos');
+         return;
+       }
+       if (users[email]) {
+         setError('Ya existe un usuario con este email');
+         return;
+       }
+       const newUser = { name, email, password };
+       users[email] = newUser;
+       localStorage.setItem('taxi_users_db', JSON.stringify(users));
+       if (onLogin) onLogin({ name, email });
+    } else {
+       if (!email || !password) {
+         setError('Por favor, rellena todos los campos');
+         return;
+       }
+       const existingUser = users[email];
+       if (!existingUser || existingUser.password !== password) {
+         setError('Credenciales incorrectas');
+         return;
+       }
+       if (onLogin) onLogin({ name: existingUser.name, email });
+    }
+  };
   
   if (!activeModal) return null;
 
@@ -43,17 +79,17 @@ export function MenuModals({ activeModal, onClose, onLogin, onLogout }: MenuModa
             <div className="p-6 flex flex-col gap-4 overflow-y-auto">
               <div className="flex justify-center mb-4">
                 <div className="w-24 h-24 bg-indigo-100 dark:bg-indigo-900/40 rounded-full flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-4xl border-4 border-white dark:border-zinc-800 shadow-md">
-                  C
+                  {user?.name?.charAt(0).toUpperCase()}
                 </div>
               </div>
               <div className="space-y-4">
                 <div>
                   <label className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Nombre Completo</label>
-                  <input type="text" defaultValue="Cliente Frecuente" className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
+                  <input type="text" defaultValue={user?.name || ''} className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Email</label>
-                  <input type="email" defaultValue="cliente@ejemplo.com" className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
+                  <input type="email" defaultValue={user?.email || ''} className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Teléfono</label>
@@ -84,23 +120,27 @@ export function MenuModals({ activeModal, onClose, onLogin, onLogout }: MenuModa
               <p className="text-sm font-semibold text-slate-500 dark:text-zinc-400 mb-2">
                 {isRegisterMode ? 'Crea una cuenta para pedir un TaxiGo de forma rápida y segura.' : 'Conéctate para poder pedir un TaxiGo de forma rápida y segura.'}
               </p>
+              {error && <p className="text-sm font-bold text-red-500 bg-red-50 dark:bg-red-950/30 p-2 rounded-lg">{error}</p>}
               <div className="space-y-4">
                 {isRegisterMode && (
                   <div>
                     <label className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Nombre Completo</label>
-                    <input type="text" placeholder="Ej: Marcos García" className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
+                    <input value={name} onChange={e=>setName(e.target.value)} type="text" placeholder="Ej: Marcos García" className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
                   </div>
                 )}
                 <div>
                   <label className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Email o Teléfono</label>
-                  <input type="text" placeholder="Ej: +34 600 000 000" className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
+                  <input value={email} onChange={e=>setEmail(e.target.value)} type="text" placeholder="Ej: marcos@ejemplo.com" className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Contraseña</label>
-                  <input type="password" placeholder="••••••••" className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
+                  <input value={password} onChange={e=>setPassword(e.target.value)} type="password" placeholder="••••••••" className="mt-1 w-full p-3 rounded-xl border border-slate-200 dark:border-zinc-800 dark:bg-zinc-950 font-bold dark:text-white focus:outline-none focus:border-indigo-500" />
                 </div>
               </div>
-              <button onClick={() => { setIsRegisterMode(false); if (onLogin) onLogin(); }} className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+              <button 
+                onClick={handleAuth} 
+                className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+              >
                 {isRegisterMode ? 'Crear Cuenta' : 'Conectarse'}
               </button>
               

@@ -9,7 +9,7 @@ import { useTheme } from '../ThemeProvider';
 import { MenuModals } from './MenuModals';
 
 // Fixed mock locations
-const PICKUP_LOCATION: [number, number] = [40.4168, -3.7038]; 
+const PICKUP_LOCATION: [number, number] = [43.0125, -7.5558]; 
 const DROPOFF_LOCATION: [number, number] = [40.4350, -3.6900];
 
 export default function CustomerApp() {
@@ -28,25 +28,48 @@ export default function CustomerApp() {
   const [assignedDriver, setAssignedDriver] = useState<Driver | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [activeCommModal, setActiveCommModal] = useState<'call' | 'chat' | null>(null);
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatHistory, setChatHistory] = useState<{sender: string, text: string}[]>([]);
+  const [user, setUser] = useState<{name: string, email: string} | null>(() => {
+    const saved = localStorage.getItem('taxi_user');
+    return saved ? JSON.parse(saved) : null;
+  });
 
   // Map state
   const [center, setCenter] = useState<[number, number]>(PICKUP_LOCATION);
   const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
+  const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
+  const [estimatedDuration, setEstimatedDuration] = useState<number | null>(null);
   const [activeCarLocation, setActiveCarLocation] = useState<[number, number] | null>(null);
+  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
 
   const openModal = (modalName: string) => {
     setIsMenuOpen(false);
     setActiveModal(modalName);
   };
 
-  const fetchRoute = async (start: [number, number], end: [number, number]) => {
+  const fetchRoute = async (start: [number, number], end: [number, number], routeType: 'trip' | 'eta' = 'trip') => {
      try {
-       const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?geometries=geojson`);
+       const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?geometries=geojson&overview=full`);
        const data = await res.json();
-       if (data.routes && data.routes[0]) {
-         return data.routes[0].geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]] as [number, number]);
+       if (data.routes && data.routes[0] && Array.isArray(data.routes[0].geometry.coordinates)) {
+         const dist = data.routes[0].distance || 0;
+         const duration = Math.ceil((data.routes[0].duration || 0) / 60); // duration in minutes
+         
+         if (routeType === 'trip') {
+           const cost = 2.50 + Math.max((dist / 1000) * 1.05, 0); // 2.5 eur base price + 1.05 eur per km
+           setEstimatedCost(cost);
+         } else if (routeType === 'eta') {
+           setEstimatedDuration(duration);
+         }
+         
+         const coords = data.routes[0].geometry.coordinates
+           .filter((c: any) => c && Array.isArray(c) && c.length >= 2 && typeof c[0] === 'number' && typeof c[1] === 'number' && !Number.isNaN(c[0]) && !Number.isNaN(c[1]))
+           .map((coord: number[]) => [coord[1], coord[0]] as [number, number]);
+         if (coords.length > 0) return coords;
        }
+       return [];
      } catch (e) {
          console.error('Failed to fetch route');
      }
@@ -57,17 +80,19 @@ export default function CustomerApp() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (position) => {
         const { latitude, longitude } = position.coords;
-        setPickupLoc([latitude, longitude]);
-        setCenter([latitude, longitude]);
-        try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
-          const data = await res.json();
-          if (data && data.display_name) {
-             const parts = data.display_name.split(',');
-             setPickup(parts[0] + (parts[1] ? ',' + parts[1] : ''));
+        if (typeof latitude === 'number' && typeof longitude === 'number' && !Number.isNaN(latitude) && !Number.isNaN(longitude)) {
+          setPickupLoc([latitude, longitude]);
+          setCenter([latitude, longitude]);
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+            const data = await res.json();
+            if (data && data.display_name) {
+               const parts = data.display_name.split(',');
+               setPickup(parts[0] + (parts[1] ? ',' + parts[1] : ''));
+            }
+          } catch (e) {
+            console.error(e);
           }
-        } catch (e) {
-          console.error(e);
         }
       }, (error) => {
         console.error("Error getting location: ", error);
@@ -81,13 +106,20 @@ export default function CustomerApp() {
     const getRoutePoints = async () => {
       if (status === 'idle' || status === 'searching') {
         setCenter(pickupLoc);
-        setRoutePoints([]);
         setActiveCarLocation(null);
+        if (dropoffLoc && status === 'idle') {
+           const route = await fetchRoute(pickupLoc, dropoffLoc, 'trip');
+           if (active) setRoutePoints(route);
+        } else {
+           setRoutePoints([]);
+           setEstimatedCost(null);
+           setEstimatedDuration(null);
+        }
       } else if (status === 'driver_found' && assignedDriver) {
-        const route = await fetchRoute(assignedDriver.location, pickupLoc);
+        const route = await fetchRoute(assignedDriver.location, pickupLoc, 'eta');
         if (active) setRoutePoints(route);
       } else if (status === 'in_progress' && dropoffLoc) {
-        const route = await fetchRoute(pickupLoc, dropoffLoc);
+        const route = await fetchRoute(pickupLoc, dropoffLoc, 'trip');
         if (active) setRoutePoints(route);
       }
     };
@@ -97,13 +129,22 @@ export default function CustomerApp() {
     return () => { active = false; };
   }, [status, assignedDriver, pickupLoc, dropoffLoc]);
 
+  // Haptic feedback for ride events
+  useEffect(() => {
+    if (status === 'driver_found') {
+      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+    } else if (status === 'in_progress') {
+      if ('vibrate' in navigator) navigator.vibrate([300, 100, 300, 100, 300]);
+    }
+  }, [status]);
+
   useEffect(() => {
     if (routePoints.length < 2) {
       setActiveCarLocation(null);
       return;
     }
     
-    let duration = 0;
+  let duration = 0;
     if (status === 'driver_found') {
       duration = 10000;
     } else if (status === 'in_progress') {
@@ -188,7 +229,8 @@ export default function CustomerApp() {
     searchTimeout.current = window.setTimeout(async () => {
       setIsSearching(true);
       try {
-         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`);
+         const viewbox = `${pickupLoc[1] - 0.2},${pickupLoc[0] + 0.2},${pickupLoc[1] + 0.2},${pickupLoc[0] - 0.2}`;
+         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&viewbox=${viewbox}&bounded=0`);
          const data = await res.json();
          setSearchResults(data);
       } catch (e) {
@@ -201,7 +243,11 @@ export default function CustomerApp() {
   const handleSelectDropoff = (result: any) => {
    const shortName = result.display_name.split(',')[0];
    setDropoff(shortName);
-   setDropoffLoc([parseFloat(result.lat), parseFloat(result.lon)]);
+   const lat = parseFloat(result.lat);
+   const lon = parseFloat(result.lon);
+   if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+      setDropoffLoc([lat, lon]);
+   }
    setSearchResults([]);
   };
 
@@ -259,12 +305,12 @@ export default function CustomerApp() {
                  </button>
                  <div className="flex items-center gap-4">
                     <div className="w-14 h-14 bg-indigo-100 dark:bg-indigo-900/40 rounded-full flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xl border-2 border-white dark:border-zinc-800 shadow-sm">
-                      {isAuthenticated ? 'C' : '?'}
+                      {user ? user.name.charAt(0).toUpperCase() : '?'}
                     </div>
                     <div>
-                      {isAuthenticated ? (
+                      {user ? (
                         <>
-                          <h3 className="font-bold text-lg dark:text-white">Cliente</h3>
+                          <h3 className="font-bold text-lg dark:text-white">{user.name}</h3>
                           <div className="flex items-center gap-1 text-sm font-semibold text-slate-500 dark:text-zinc-400">
                             <Star size={14} fill="currentColor" className="text-yellow-500" />
                             5.0
@@ -279,7 +325,7 @@ export default function CustomerApp() {
               
               <div className="flex-1 overflow-y-auto py-4">
                 <nav className="flex flex-col gap-1 px-4">
-                  {isAuthenticated ? (
+                  {user ? (
                     <>
                       <span onClick={() => openModal('profile')} className="cursor-pointer flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-900 font-bold text-slate-700 dark:text-zinc-300 transition-colors">
                         <User size={22} className="text-slate-400" /> Mi Perfil
@@ -330,9 +376,75 @@ export default function CustomerApp() {
         drivers={displayDrivers} 
         center={center} 
         routePoints={routePoints}
-        pickup={status !== 'idle' ? pickupLoc : undefined}
-        dropoff={status === 'in_progress' && dropoffLoc ? dropoffLoc : undefined}
+        pickup={pickupLoc}
+        dropoff={dropoffLoc ? dropoffLoc : undefined}
+        onDriverClick={(driver) => {
+          if (status === 'idle') {
+            setSelectedDriver(driver);
+          }
+        }}
       />
+
+      <AnimatePresence>
+        {selectedDriver && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-0 left-0 w-full z-50 bg-white dark:bg-zinc-900 rounded-t-3xl shadow-2xl p-6 border-t border-slate-200 dark:border-zinc-800"
+          >
+            <div className="absolute top-4 right-4">
+              <button onClick={() => setSelectedDriver(null)} className="p-2 bg-slate-100 dark:bg-zinc-800 rounded-full text-slate-500 dark:text-zinc-400">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex items-center gap-4 mb-4">
+               <img src={selectedDriver.avatar} alt="Avatar" className="w-16 h-16 rounded-full object-cover shadow-sm bg-slate-100" />
+               <div className="flex-1">
+                  <h3 className="font-bold text-xl dark:text-white flex items-center gap-2">
+                    {selectedDriver.name}
+                    <span className="flex items-center gap-1 text-sm bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full mt-1">
+                      <Star size={12} className="fill-current" />
+                      {selectedDriver.rating}
+                    </span>
+                  </h3>
+                  <p className="text-slate-500 dark:text-zinc-400 flex items-center gap-2 text-sm mt-1">
+                    <Car size={14} /> {selectedDriver.vehicle} • {selectedDriver.plate}
+                  </p>
+               </div>
+            </div>
+            
+            {dropoffLoc && estimatedCost !== null && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-4 p-4 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-2xl flex items-center justify-between">
+                 <span className="font-bold text-slate-600 dark:text-zinc-300">Coste estimado</span>
+                 <span className="font-bold text-xl dark:text-white">{estimatedCost.toFixed(2)} €</span>
+              </motion.div>
+            )}
+
+            <button 
+              onClick={() => {
+                if (!user) {
+                  openModal('login');
+                  return;
+                }
+                if (!dropoffLoc) {
+                  alert('Por favor selecciona un destino antes de iniciar el viaje.');
+                  setSelectedDriver(null);
+                  return;
+                }
+                setAssignedDriver(selectedDriver);
+                setActiveCarLocation(selectedDriver.location);
+                setStatus('searching');
+                setSelectedDriver(null);
+                setTimeout(() => setStatus('driver_found'), 1500);
+              }}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2"
+            >
+               Iniciar Viaje con {selectedDriver.name.split(' ')[0]}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Gradient Overlay for bottom sheet */}
       <div className="absolute bottom-[200px] left-0 w-full h-[200px] bg-gradient-to-t from-slate-50 dark:from-zinc-950 via-slate-50/50 dark:via-zinc-950/50 to-transparent z-10 pointer-events-none" />
@@ -376,7 +488,7 @@ export default function CustomerApp() {
                        placeholder="Buscar destino..."
                        value={dropoff}
                        onChange={(e) => {
-                         if (!isAuthenticated) {
+                         if (!user) {
                            openModal('login');
                            return;
                          }
@@ -404,16 +516,23 @@ export default function CustomerApp() {
                  </div>
               </div>
 
+              {dropoffLoc && estimatedCost !== null && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 mb-2 p-4 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl flex items-center justify-between">
+                   <span className="font-bold text-slate-600 dark:text-zinc-400">Coste estimado</span>
+                   <span className="font-bold text-xl dark:text-white">{estimatedCost.toFixed(2)} €</span>
+                </motion.div>
+              )}
+
               <motion.button 
                 whileTap={{ scale: 0.98 }}
                 onClick={() => {
-                  if (!isAuthenticated) openModal('login');
+                  if (!user) openModal('login');
                   else handleRequestRide();
                 }}
-                disabled={isAuthenticated && !dropoffLoc}
+                disabled={!!user && !dropoffLoc}
                 className="w-full mt-6 bg-black dark:bg-white text-white dark:text-black font-bold py-4 rounded-2xl text-lg shadow-lg dark:shadow-none hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {isAuthenticated ? 'Solicitar TaxiGo' : 'Inicia Sesión'}
+                {user ? 'Solicitar TaxiGo' : 'Inicia Sesión'}
               </motion.button>
             </motion.div>
           )}
@@ -457,7 +576,7 @@ export default function CustomerApp() {
                  <h2 className="text-2xl font-bold tracking-tight dark:text-white">Tu coche está en camino</h2>
                  <div className="flex gap-1.5 items-center bg-slate-100 dark:bg-zinc-800 px-3 py-1 rounded-full text-sm">
                    <Clock size={14} className="text-slate-500 dark:text-zinc-400" />
-                   <span className="font-bold text-slate-700 dark:text-zinc-200">5 min</span>
+                   <span className="font-bold text-slate-700 dark:text-zinc-200">{estimatedDuration !== null ? `${estimatedDuration} min` : 'Calculando...'}</span>
                  </div>
               </div>
               <p className="text-slate-500 dark:text-zinc-400 text-sm mb-6 pb-6 border-b border-slate-100 dark:border-zinc-800">El conductor llegará pronto a tu ubicación.</p>
@@ -492,11 +611,11 @@ export default function CustomerApp() {
               </button>
 
               <div className="flex gap-3">
-                 <button className="flex-1 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:border-black dark:hover:border-white transition-colors py-3.5 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm dark:shadow-none">
+                 <button onClick={() => setActiveCommModal('chat')} className="flex-1 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:border-black dark:hover:border-white transition-colors py-3.5 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm dark:shadow-none">
                    <MessageSquare size={18} />
                    Mensaje
                  </button>
-                 <button className="flex-1 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:border-black dark:hover:border-white transition-colors py-3.5 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm dark:shadow-none">
+                 <button onClick={() => setActiveCommModal('call')} className="flex-1 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:border-black dark:hover:border-white transition-colors py-3.5 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm dark:shadow-none">
                    <Phone size={18} />
                    Llamar
                  </button>
@@ -539,15 +658,113 @@ export default function CustomerApp() {
       </div>
 
       <AnimatePresence>
+        {activeCommModal === 'call' && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-zinc-900 text-white"
+          >
+            <div className="absolute top-8 left-8 right-8 flex justify-end">
+              <button onClick={() => setActiveCommModal(null)} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
+                 <X size={24} />
+              </button>
+            </div>
+            
+             <img src={assignedDriver?.avatar} alt="Driver" className="w-32 h-32 rounded-full mb-6 border-4 border-white/20 shadow-2xl" />
+             <h2 className="text-3xl font-bold mb-2">{assignedDriver?.name}</h2>
+             <p className="text-zinc-400 text-lg mb-12 animate-pulse">Llamando...</p>
+             
+             <div className="flex gap-6">
+                <button 
+                  onClick={() => setActiveCommModal(null)}
+                  className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center shadow-lg hover:bg-red-600 transition-colors"
+                >
+                   <Phone size={28} className="fill-current text-white transform rotate-[135deg]" />
+                </button>
+             </div>
+          </motion.div>
+        )}
+
+        {activeCommModal === 'chat' && (
+          <motion.div 
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="fixed inset-0 z-50 bg-white dark:bg-zinc-900 flex flex-col"
+          >
+             <div className="p-4 bg-slate-100 dark:bg-zinc-950 flex items-center gap-4 border-b border-slate-200 dark:border-zinc-800">
+                <button onClick={() => setActiveCommModal(null)} className="p-2 bg-slate-200 dark:bg-zinc-800 rounded-full">
+                  <X size={20} />
+                </button>
+                <div className="flex items-center gap-3">
+                   <img src={assignedDriver?.avatar} alt="Driver" className="w-10 h-10 rounded-full object-cover" />
+                   <div>
+                     <h3 className="font-bold text-sm dark:text-white">{assignedDriver?.name}</h3>
+                     <p className="text-xs text-slate-500 dark:text-zinc-400 font-semibold">{assignedDriver?.vehicle} • {assignedDriver?.plate}</p>
+                   </div>
+                </div>
+             </div>
+             
+             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+                <div className="text-xs text-center text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-widest my-2">Hoy</div>
+                {chatHistory.map((msg, i) => (
+                  <div key={i} className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.sender === 'user' ? 'bg-indigo-600 text-white self-end rounded-tr-sm' : 'bg-slate-100 dark:bg-zinc-800 dark:text-white self-start rounded-tl-sm'}`}>
+                    {msg.text}
+                  </div>
+                ))}
+             </div>
+             
+             <div className="p-4 bg-white dark:bg-zinc-900 border-t border-slate-200 dark:border-zinc-800 flex gap-2">
+                <input 
+                  type="text" 
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && chatMessage.trim()) {
+                      setChatHistory([...chatHistory, { sender: 'user', text: chatMessage.trim() }]);
+                      setChatMessage('');
+                      setTimeout(() => {
+                        setChatHistory(prev => [...prev, { sender: 'driver', text: 'Ok, voy en camino!' }]);
+                      }, 1000);
+                    }
+                  }}
+                  className="flex-1 bg-slate-100 dark:bg-zinc-800 border-none rounded-full px-4 outline-none dark:text-white"
+                  placeholder="Escribe un mensaje..."
+                />
+                <button 
+                  onClick={() => {
+                    if (chatMessage.trim()) {
+                      setChatHistory([...chatHistory, { sender: 'user', text: chatMessage.trim() }]);
+                      setChatMessage('');
+                      setTimeout(() => {
+                        setChatHistory(prev => [...prev, { sender: 'driver', text: 'Ok, voy en camino!' }]);
+                      }, 1000);
+                    }
+                  }}
+                  className="w-12 h-12 bg-indigo-600 text-white rounded-full flex items-center justify-center shrink-0"
+                >
+                  <Navigation size={18} className="transform rotate-90 -ml-1 mt-1" />
+                </button>
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         <MenuModals 
           activeModal={activeModal} 
           onClose={() => setActiveModal(null)} 
-          onLogin={() => {
-            setIsAuthenticated(true);
+          user={user}
+          onLogin={(userData) => {
+            setUser(userData);
+            localStorage.setItem('taxi_user', JSON.stringify(userData));
             setActiveModal(null);
           }}
           onLogout={() => {
-            setIsAuthenticated(false);
+            setUser(null);
+            localStorage.removeItem('taxi_user');
             setActiveModal(null);
           }}
         />

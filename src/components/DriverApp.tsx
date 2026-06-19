@@ -1,17 +1,40 @@
-import { useState } from 'react';
-import { motion } from 'motion/react';
-import { ChevronRight, ArrowLeft, Car, ShieldCheck, Wallet, Map, LogOut, Moon, Sun, Navigation } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ChevronRight, ArrowLeft, Car, ShieldCheck, Wallet, Map, LogOut, Moon, Sun, Navigation, MessageSquare, Phone, X } from 'lucide-react';
 import { drivers } from '../data';
 import { Driver } from '../types';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '../ThemeProvider';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+const WEEKLY_EARNINGS = [
+  { day: 'Lun', amount: 80 },
+  { day: 'Mar', amount: 120 },
+  { day: 'Mié', amount: 95 },
+  { day: 'Jue', amount: 150 },
+  { day: 'Vie', amount: 210 },
+  { day: 'Sáb', amount: 180 },
+  { day: 'Dom', amount: 142.50 },
+];
 
 export default function DriverApp() {
   const { theme, toggleTheme } = useTheme();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeDriver, setActiveDriver] = useState<Driver | null>(null);
   const [tripState, setTripState] = useState<'idle' | 'request' | 'in_progress'>('idle');
+  const [activeCommModal, setActiveCommModal] = useState<'call' | 'chat' | null>(null);
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatHistory, setChatHistory] = useState<{sender: string, text: string}[]>([]);
   const navigate = useNavigate();
+
+  // Haptic feedback for ride events
+  useEffect(() => {
+    if (tripState === 'request') {
+      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+    } else if (tripState === 'in_progress') {
+      if ('vibrate' in navigator) navigator.vibrate([300, 100, 300, 100, 300]);
+    }
+  }, [tripState]);
 
   const handleLogin = (driverId: string) => {
     const driver = drivers.find(d => d.id === driverId);
@@ -97,7 +120,7 @@ export default function DriverApp() {
 
        <div className="p-6 flex-1 overflow-y-auto max-w-lg mx-auto w-full">
           {/* Stats Grid */}
-          <div className="grid grid-cols-2 gap-4 mb-8">
+          <div className="grid grid-cols-2 gap-4 mb-4">
              <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm dark:shadow-none p-5 rounded-[24px]">
                 <p className="text-slate-400 dark:text-zinc-500 text-xs font-bold uppercase tracking-wide mb-2">Ingresos hoy</p>
                 <p className="text-3xl font-bold tracking-tight">€142<span className="text-lg text-slate-400 dark:text-zinc-600">.50</span></p>
@@ -106,6 +129,26 @@ export default function DriverApp() {
                 <p className="text-slate-400 dark:text-zinc-500 text-xs font-bold uppercase tracking-wide mb-2">Viajes Totales</p>
                 <p className="text-3xl font-bold tracking-tight">{activeDriver.trips}</p>
              </div>
+          </div>
+
+          {/* Earnings Chart */}
+          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm dark:shadow-none p-5 rounded-[24px] mb-8">
+            <p className="text-slate-400 dark:text-zinc-500 text-xs font-bold uppercase tracking-wide mb-4">Ingresos de la semana</p>
+            <div className="h-48 w-full -ml-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={WEEKLY_EARNINGS}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#3f3f46' : '#e2e8f0'} />
+                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: theme === 'dark' ? '#a1a1aa' : '#64748b' }} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: theme === 'dark' ? '#a1a1aa' : '#64748b' }} tickFormatter={(val) => `€${val}`} />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: theme === 'dark' ? '#18181b' : '#ffffff', color: theme === 'dark' ? '#ffffff' : '#000000' }}
+                    formatter={(value: number) => [`€${value.toFixed(2)}`, 'Ingresos']}
+                    labelStyle={{ color: theme === 'dark' ? '#a1a1aa' : '#64748b', marginBottom: '4px' }}
+                  />
+                  <Line type="monotone" dataKey="amount" stroke="#4f46e5" strokeWidth={3} dot={{ r: 4, fill: '#4f46e5', strokeWidth: 2, stroke: theme === 'dark' ? '#18181b' : '#ffffff' }} activeDot={{ r: 6 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
           <h3 className="text-lg font-bold mb-4 tracking-tight">Tu Vehículo</h3>
@@ -172,9 +215,17 @@ export default function DriverApp() {
               <div className="w-14 h-14 bg-blue-50 dark:bg-zinc-800 border border-blue-100 dark:border-zinc-700 rounded-full flex items-center justify-center">
                 <Navigation className="text-blue-600 dark:text-blue-400" size={24} />
               </div>
-              <div>
+              <div className="flex-1">
                 <h4 className="font-bold text-lg leading-tight dark:text-white">En Ruta</h4>
-                <p className="text-slate-500 dark:text-zinc-400 font-medium text-sm">Viaje en curso...</p>
+                <p className="text-slate-500 dark:text-zinc-400 font-medium text-sm">Viaje en curso hacia el pasajero...</p>
+              </div>
+              <div className="flex gap-2">
+                 <button onClick={() => setActiveCommModal('chat')} className="w-12 h-12 bg-slate-100 dark:bg-zinc-800 rounded-full flex items-center justify-center text-slate-700 dark:text-zinc-300 hover:bg-slate-200 transition-colors">
+                    <MessageSquare size={20} />
+                 </button>
+                 <button onClick={() => setActiveCommModal('call')} className="w-12 h-12 bg-slate-100 dark:bg-zinc-800 rounded-full flex items-center justify-center text-slate-700 dark:text-zinc-300 hover:bg-slate-200 transition-colors">
+                    <Phone size={20} />
+                 </button>
               </div>
             </div>
             <button onClick={() => setTripState('idle')} className="w-full bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 active:scale-95 text-slate-900 dark:text-white font-bold py-4 rounded-2xl text-lg transition-transform flex items-center justify-center gap-2 uppercase tracking-wide">
@@ -182,6 +233,106 @@ export default function DriverApp() {
             </button>
          </div>
        )}
+
+      <AnimatePresence>
+        {activeCommModal === 'call' && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-zinc-900 text-white"
+          >
+            <div className="absolute top-8 left-8 right-8 flex justify-end">
+              <button onClick={() => setActiveCommModal(null)} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
+                 <X size={24} />
+              </button>
+            </div>
+            
+             <div className="w-32 h-32 bg-indigo-500 rounded-full mb-6 border-4 border-white/20 shadow-2xl flex items-center justify-center text-4xl font-bold">
+               P
+             </div>
+             <h2 className="text-3xl font-bold mb-2">Pasajero</h2>
+             <p className="text-zinc-400 text-lg mb-12 animate-pulse">Llamando...</p>
+             
+             <div className="flex gap-6">
+                <button 
+                  onClick={() => setActiveCommModal(null)}
+                  className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center shadow-lg hover:bg-red-600 transition-colors"
+                >
+                   <Phone size={28} className="fill-current text-white transform rotate-[135deg]" />
+                </button>
+             </div>
+          </motion.div>
+        )}
+
+        {activeCommModal === 'chat' && (
+          <motion.div 
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="fixed inset-0 z-50 bg-white dark:bg-zinc-900 flex flex-col"
+          >
+             <div className="p-4 bg-slate-100 dark:bg-zinc-950 flex items-center gap-4 border-b border-slate-200 dark:border-zinc-800">
+                <button onClick={() => setActiveCommModal(null)} className="p-2 bg-slate-200 dark:bg-zinc-800 rounded-full">
+                  <X size={20} />
+                </button>
+                <div className="flex items-center gap-3">
+                   <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center font-bold text-white">
+                     P
+                   </div>
+                   <div>
+                     <h3 className="font-bold text-sm dark:text-white">Pasajero</h3>
+                     <p className="text-xs text-slate-500 dark:text-zinc-400 font-semibold">Cliente</p>
+                   </div>
+                </div>
+             </div>
+             
+             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+                <div className="text-xs text-center text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-widest my-2">Hoy</div>
+                {chatHistory.map((msg, i) => (
+                  <div key={i} className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.sender === 'driver' ? 'bg-indigo-600 text-white self-end rounded-tr-sm' : 'bg-slate-100 dark:bg-zinc-800 dark:text-white self-start rounded-tl-sm'}`}>
+                    {msg.text}
+                  </div>
+                ))}
+             </div>
+             
+             <div className="p-4 bg-white dark:bg-zinc-900 border-t border-slate-200 dark:border-zinc-800 flex gap-2">
+                <input 
+                  type="text" 
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && chatMessage.trim()) {
+                      setChatHistory([...chatHistory, { sender: 'driver', text: chatMessage.trim() }]);
+                      setChatMessage('');
+                      setTimeout(() => {
+                        setChatHistory(prev => [...prev, { sender: 'user', text: 'Genial, aquí espero!' }]);
+                      }, 1000);
+                    }
+                  }}
+                  className="flex-1 bg-slate-100 dark:bg-zinc-800 border-none rounded-full px-4 outline-none dark:text-white"
+                  placeholder="Escribe un mensaje..."
+                />
+                <button 
+                  onClick={() => {
+                    if (chatMessage.trim()) {
+                      setChatHistory([...chatHistory, { sender: 'driver', text: chatMessage.trim() }]);
+                      setChatMessage('');
+                      setTimeout(() => {
+                        setChatHistory(prev => [...prev, { sender: 'user', text: 'Genial, aquí espero!' }]);
+                      }, 1000);
+                    }
+                  }}
+                  className="w-12 h-12 bg-indigo-600 text-white rounded-full flex items-center justify-center shrink-0"
+                >
+                  <Navigation size={18} className="transform rotate-90 -ml-1 mt-1" />
+                </button>
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

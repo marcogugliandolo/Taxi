@@ -9,13 +9,15 @@ export default function MapView({
   center, 
   routePoints,
   pickup,
-  dropoff
+  dropoff,
+  onDriverClick
 }: { 
   drivers: Driver[], 
   center: [number, number],
   routePoints?: [number, number][],
   pickup?: [number, number],
-  dropoff?: [number, number]
+  dropoff?: [number, number],
+  onDriverClick?: (driver: Driver) => void
 }) {
   const { theme } = useTheme();
   const mapUrl = theme === 'dark' 
@@ -45,13 +47,16 @@ export default function MapView({
     iconAnchor: [8, 8],
   });
 
+  const isValidCoord = (c: any) => c && Array.isArray(c) && c.length >= 2 && typeof c[0] === 'number' && typeof c[1] === 'number' && !Number.isNaN(c[0]) && !Number.isNaN(c[1]) && isFinite(c[0]) && isFinite(c[1]);
+  const safeRoutePoints = routePoints?.filter(isValidCoord);
+
   return (
-    <MapContainer center={center} zoom={15} zoomControl={false} className="w-full h-full absolute inset-0 z-0 bg-[#E8EEF2] dark:bg-zinc-950">
+    <MapContainer center={isValidCoord(center) ? center : [43.0125, -7.5558]} zoom={15} zoomControl={false} className="w-full h-full absolute inset-0 z-0 bg-[#E8EEF2] dark:bg-zinc-950">
       <TileLayer key={theme} url={mapUrl} />
       
-      {routePoints && routePoints.length > 0 && (
+      {safeRoutePoints && safeRoutePoints.length > 0 && (
         <Polyline 
-          positions={routePoints} 
+          positions={safeRoutePoints} 
           color={theme === 'dark' ? '#60a5fa' : '#3b82f6'} 
           weight={5} 
           opacity={0.8}
@@ -60,13 +65,13 @@ export default function MapView({
         />
       )}
 
-      {pickup && <Marker position={pickup} icon={pickupIcon} />}
-      {dropoff && <Marker position={dropoff} icon={dropoffIcon} />}
+      {pickup && isValidCoord(pickup) && <Marker position={pickup} icon={pickupIcon} />}
+      {dropoff && isValidCoord(dropoff) && <Marker position={dropoff} icon={dropoffIcon} />}
 
-      {drivers.map(d => (
-        <Marker key={d.id} position={d.location} icon={carIcon} />
+      {drivers.filter(d => isValidCoord(d.location)).map(d => (
+        <Marker key={d.id} position={d.location} icon={carIcon} eventHandlers={onDriverClick ? { click: () => onDriverClick(d) } : undefined} />
       ))}
-      <MapController center={center} routePoints={routePoints} />
+      <MapController center={isValidCoord(center) ? center : [43.0125, -7.5558]} routePoints={safeRoutePoints} />
     </MapContainer>
   );
 }
