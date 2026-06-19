@@ -195,7 +195,9 @@ export default function CustomerApp() {
          currentDist += slen;
       }
 
-      setActiveCarLocation(currentLoc);
+      if (!Number.isNaN(currentLoc[0]) && !Number.isNaN(currentLoc[1]) && isFinite(currentLoc[0]) && isFinite(currentLoc[1])) {
+        setActiveCarLocation(currentLoc);
+      }
 
       if (progress < 1) {
         animationFrameId = requestAnimationFrame(animateCar);

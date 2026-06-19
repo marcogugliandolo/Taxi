@@ -10,6 +10,8 @@ services:
     environment:
       - NODE_ENV=production
       - HOST=0.0.0.0 
+    volumes:
+      - taxi_datos:/app/data
     command: >
       /bin/sh -c "
       echo 'Preparando entorno...' &&
@@ -28,3 +30,6 @@ services:
       echo 'Compilando...' && npm run build &&
       echo 'Arrancando servidor...' && npx serve -s dist -l 3000
       "
+
+volumes:
+  ride_datos:

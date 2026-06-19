@@ -47,11 +47,13 @@ export default function MapView({
     iconAnchor: [8, 8],
   });
 
-  const isValidCoord = (c: any) => c && Array.isArray(c) && c.length >= 2 && typeof c[0] === 'number' && typeof c[1] === 'number' && !Number.isNaN(c[0]) && !Number.isNaN(c[1]) && isFinite(c[0]) && isFinite(c[1]);
+  const isValidCoord = (c: any): c is [number, number] => c && Array.isArray(c) && c.length >= 2 && typeof c[0] === 'number' && typeof c[1] === 'number' && !Number.isNaN(c[0]) && !Number.isNaN(c[1]) && isFinite(c[0]) && isFinite(c[1]);
   const safeRoutePoints = routePoints?.filter(isValidCoord);
 
+  const safeCenter = isValidCoord(center) ? center : ([43.0125, -7.5558] as [number, number]);
+
   return (
-    <MapContainer center={isValidCoord(center) ? center : [43.0125, -7.5558]} zoom={15} zoomControl={false} className="w-full h-full absolute inset-0 z-0 bg-[#E8EEF2] dark:bg-zinc-950">
+    <MapContainer center={safeCenter} zoom={15} zoomControl={false} className="w-full h-full absolute inset-0 z-0 bg-[#E8EEF2] dark:bg-zinc-950">
       <TileLayer key={theme} url={mapUrl} />
       
       {safeRoutePoints && safeRoutePoints.length > 0 && (
@@ -69,9 +71,9 @@ export default function MapView({
       {dropoff && isValidCoord(dropoff) && <Marker position={dropoff} icon={dropoffIcon} />}
 
       {drivers.filter(d => isValidCoord(d.location)).map(d => (
-        <Marker key={d.id} position={d.location} icon={carIcon} eventHandlers={onDriverClick ? { click: () => onDriverClick(d) } : undefined} />
+        <Marker key={d.id} position={d.location as [number, number]} icon={carIcon} eventHandlers={onDriverClick ? { click: () => onDriverClick(d) } : undefined} />
       ))}
-      <MapController center={isValidCoord(center) ? center : [43.0125, -7.5558]} routePoints={safeRoutePoints} />
+      <MapController center={safeCenter} routePoints={safeRoutePoints} />
     </MapContainer>
   );
 }
@@ -79,12 +81,32 @@ export default function MapView({
 function MapController({ center, routePoints }: { center: [number, number], routePoints?: [number, number][] }) {
   const map = useMap();
   useEffect(() => {
-    if (routePoints && routePoints.length > 1) {
-      const bounds = L.latLngBounds(routePoints as [number, number][]);
-      // Pad bounds taking into account the UI overlays (bottom sheet padding)
-      map.fitBounds(bounds, { animate: true, duration: 1.5, paddingBottomRight: [0, 300], paddingTopLeft: [40, 40] });
-    } else {
-      map.flyTo(center, 15, { animate: true, duration: 1.5 });
+    const isValidCoord = (c: any): c is [number, number] => c && Array.isArray(c) && c.length >= 2 && typeof c[0] === 'number' && typeof c[1] === 'number' && !Number.isNaN(c[0]) && !Number.isNaN(c[1]) && isFinite(c[0]) && isFinite(c[1]);
+    const validPoints = routePoints?.filter(isValidCoord);
+
+    if (validPoints && validPoints.length > 1) {
+      try {
+        const bounds = L.latLngBounds(validPoints);
+        map.fitBounds(bounds, { animate: true, duration: 1.5, paddingBottomRight: [0, 300], paddingTopLeft: [40, 40] });
+      } catch (e) {
+        console.warn('Failed to fit bounds', e);
+        if (validPoints[0]) {
+           try {
+              map.setView(validPoints[0], 15);
+           } catch(e2) {}
+        }
+      }
+    } else if (isValidCoord(center)) {
+      try {
+        map.flyTo(center, 15, { animate: true, duration: 1.5 });
+      } catch (e) {
+        console.warn('Failed to flyTo, falling back to setView', e);
+        try {
+           map.setView(center, 15);
+        } catch (e2) {
+           console.error('Failed to setView', e2);
+        }
+      }
     }
   }, [center, routePoints, map]);
   return null;
